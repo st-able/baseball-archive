@@ -603,7 +603,7 @@ function renderStatRows(){
         '<td style="font-weight:600;font-size:12.5px;white-space:nowrap;padding-right:8px">'+p.name+'</td>'+
         '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-PA" value="0" oninput="calcPAvg('+p.id+')"></td>'+
         '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-AB" value="0" oninput="calcPAvg('+p.id+')"></td>'+
-        '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-H"  value="0" oninput="calcPAvg('+p.id+')"></td>'+
+        '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-H"  value="0" oninput="calcPAvg('+p.id+');renderMvpPicker()"></td>'+
         '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-R"  value="0" oninput="renderMvpPicker()"></td>'+
         '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-RBI" value="0" oninput="renderMvpPicker()"></td>'+
         '<td><input class="si" type="number" min="0" id="ps-'+p.id+'-HR" value="0" oninput="renderMvpPicker()"></td>'+
@@ -1034,6 +1034,19 @@ function fmtDate(s){
   const d=new Date(s+'T00:00:00');
   return d.getFullYear()+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0');
 }
+
+// 숫자 입력란 포커스 시 0 자동 제거 / 블러 시 빈값이면 0 복원
+document.addEventListener('focusin',function(e){
+  if(e.target.type==='number'&&e.target.value==='0')e.target.value='';
+});
+document.addEventListener('focusout',function(e){
+  if(e.target.type==='number'&&e.target.value==='')e.target.value='0';
+});
+
+// 경기 입력 폼에서 Enter 키 저장 방지
+document.getElementById('gf').addEventListener('keydown',function(e){
+  if(e.key==='Enter'&&e.target.tagName!=='BUTTON')e.preventDefault();
+});
 
 (async()=>{await loadDB();rDash();})();
 
