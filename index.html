@@ -697,13 +697,16 @@ async function saveGame(e){
 
 function buildSeriesStandings(){
   const GOAL=5;
-  // 시즌별 최대 시즌 번호
-  const maxSeason=db.games.reduce((m,g)=>Math.max(m,g.season??1),0);
-  // 게임을 (season, seriesNum)으로 그룹핑
+  // 시즌 1 이상만 집계 (시즌 0은 아카이브로 제외)
+  const activeGames=db.games.filter(g=>(g.season??1)>=1);
+  const maxSeason=activeGames.reduce((m,g)=>Math.max(m,g.season??1),1);
+  // 현재 시즌 게임만 집계
+  const curGames=activeGames.filter(g=>(g.season??1)===maxSeason);
+  // 게임을 시리즈별로 그룹핑
   const seriesMap={};
-  db.games.forEach(g=>{
-    const key=(g.season??1)+'-'+(g.seriesNum??1);
-    if(!seriesMap[key])seriesMap[key]={season:g.season??1,num:g.seriesNum??1,winsPerTeam:{}};
+  curGames.forEach(g=>{
+    const key=(g.seriesNum??1);
+    if(!seriesMap[key])seriesMap[key]={num:g.seriesNum??1,winsPerTeam:{}};
     if(g.win==='T')return;
     const winPids=(g.win==='A'?g.teamA.players:g.teamB.players);
     const tk=[...winPids].sort((a,b)=>a-b).join(',');
