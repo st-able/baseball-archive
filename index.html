@@ -126,6 +126,16 @@ th.c,td.c{text-align:center}
 .rc.b{background:var(--orange-bg);border:1px solid var(--orange-bd)}
 .rc.won{background:var(--green-bg);border:1px solid var(--green-bd)}
 .big-score{font-weight:800;font-size:40px;text-align:center;margin:10px 0}
+
+/* ── 시즌 현황 ── */
+.season-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.season-row:last-child{margin-bottom:0}
+.season-name{width:72px;font-size:13px;font-weight:700;color:#c0c0c0;flex-shrink:0}
+.season-bar-bg{flex:1;background:var(--brd);border-radius:4px;height:8px;overflow:hidden}
+.season-bar-fill{height:100%;border-radius:4px;transition:width .4s}
+.season-val{width:38px;text-align:right;font-size:13px;font-weight:800;flex-shrink:0}
+.season-champ{color:#FFD700}
+.sc.y{} /* yellow already defined */
 /* ── 하단 네비게이션 ── */
 .bot-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--sur);border-top:1px solid var(--brd);z-index:200;height:58px;transition:transform .28s ease}
 .bot-nav-inner{display:flex;height:100%}
@@ -231,6 +241,13 @@ th.srt-asc::after{content:'▲'}
     <div class="sc y"><div class="sl">최다 MVP</div><div class="sv" id="d-mvp-cnt">0</div><div id="d-mvp-top"></div></div>
     <div class="sc r"><div class="sl">최다 홈런</div><div class="sv" id="d-hits">0</div><div id="d-hits-top"></div></div>
   </div>
+  <div class="card mb" id="season-card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="ct" style="margin-bottom:0" id="season-card-title">🏆 시즌 1 현황</div>
+      <div style="font-size:11px;color:var(--dim)">시리즈 우승 목표: <strong style="color:var(--tx)">5회</strong></div>
+    </div>
+    <div id="d-season"></div>
+  </div>
   <div class="g3 mb">
     <div class="card"><div class="ct">최근 경기</div><div id="d-recent"></div></div>
     <div class="card"><div class="ct">승률 랭킹</div><div id="d-rank"></div></div>
@@ -266,6 +283,10 @@ th.srt-asc::after{content:'▲'}
       <div class="g2">
         <div class="fg"><label class="fl">경기 날짜</label><input type="date" class="fi" id="f-date" required></div>
         <div class="fg"><label class="fl">플레이 시간</label><input type="text" class="fi" id="f-time" placeholder="01:30"></div>
+      </div>
+      <div class="g2" style="margin-top:10px">
+        <div class="fg"><label class="fl">시즌</label><input type="number" class="fi" id="f-season" min="0" value="1"></div>
+        <div class="fg"><label class="fl">시리즈</label><input type="number" class="fi" id="f-series" min="1" value="1"></div>
       </div>
     </div>
     <div class="fsec">
@@ -394,13 +415,13 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const supa=supabase.createClient(SB_URL,SB_KEY);
 
 function toRow(g){
-  return{id:g.id,date:g.date,play_time:g.playTime||null,
+  return{id:g.id,date:g.date,play_time:g.playTime||null,season:g.season??1,series_num:g.seriesNum??1,
     team_a_players:g.teamA.players,team_a_r:g.teamA.R,team_a_h:g.teamA.H,team_a_stats:g.teamA.stats||null,
     team_b_players:g.teamB.players,team_b_r:g.teamB.R,team_b_h:g.teamB.H,team_b_stats:g.teamB.stats||null,
     win:g.win,mvp:g.mvp||null};
 }
 function fromRow(r){
-  return{id:r.id,date:r.date,playTime:r.play_time||'',
+  return{id:r.id,date:r.date,playTime:r.play_time||'',season:r.season??1,seriesNum:r.series_num??1,
     teamA:{players:r.team_a_players||[],R:r.team_a_r||0,H:r.team_a_h||0,stats:r.team_a_stats||{}},
     teamB:{players:r.team_b_players||[],R:r.team_b_r||0,H:r.team_b_h||0,stats:r.team_b_stats||{}},
     win:r.win,mvp:r.mvp||null};
@@ -466,9 +487,9 @@ async function loadDB(){
 async function upsertGame(game){
   const row=toRow(game);
   let{error}=await supa.from('games').upsert(row);
-  // mvp 컬럼이 DB에 아직 없는 경우 → mvp 제외하고 재시도
-  if(error&&error.message&&error.message.includes("'mvp'")){
-    const{mvp,...rowWithoutMvp}=row;
+  // 신규 컬럼 없는 경우 → 제외하고 재시도
+  if(error&&error.message&&(error.message.includes("'mvp'")||error.message.includes("season")||error.message.includes("series_num"))){
+    const{mvp,season,series_num,...rowWithoutMvp}=row;
     const res=await supa.from('games').upsert(rowWithoutMvp);
     error=res.error;
     if(!error)console.warn('mvp 컬럼이 DB에 없어 MVP 정보는 저장되지 않았습니다. Supabase에서 컬럼을 추가해 주세요.');
@@ -526,6 +547,12 @@ function initForm(gid){
   if(!gid){
     document.getElementById('f-date').value=new Date().toISOString().slice(0,10);
     document.getElementById('f-time').value='';
+    // default season/series: latest season, latest series in that season
+    const _maxSeason=db.games.reduce((m,g)=>Math.max(m,g.season??1),0);
+    const _seriesInSeason=db.games.filter(g=>(g.season??1)===_maxSeason).map(g=>g.seriesNum??1);
+    const _maxSeries=_seriesInSeason.length?Math.max(..._seriesInSeason):1;
+    document.getElementById('f-season').value=_maxSeason;
+    document.getElementById('f-series').value=_maxSeries;
     document.getElementById('aR').value=0;document.getElementById('aH').value=0;
     document.getElementById('bR').value=0;document.getElementById('bH').value=0;
   }else{
@@ -533,6 +560,8 @@ function initForm(gid){
     if(g){
       document.getElementById('f-date').value=g.date;
       document.getElementById('f-time').value=g.playTime||'';
+      document.getElementById('f-season').value=g.season??1;
+      document.getElementById('f-series').value=g.seriesNum??1;
       document.getElementById('aR').value=g.teamA.R;
       document.getElementById('aH').value=g.teamA.H;
       document.getElementById('bR').value=g.teamB.R;
@@ -653,7 +682,9 @@ async function saveGame(e){
     teamA:{players:tA,R:aR,H:parseInt(document.getElementById('aH').value)||0,stats:getStats(tA)},
     teamB:{players:tB,R:bR,H:parseInt(document.getElementById('bH').value)||0,stats:getStats(tB)},
     win:aR>bR?'A':aR<bR?'B':'T',
-    mvp:finalMvp
+    mvp:finalMvp,
+    season:parseInt(document.getElementById('f-season').value)??1,
+    seriesNum:parseInt(document.getElementById('f-series').value)??1
   };
   setLoading(true,'저장 중...');
   const ok=await upsertGame(game);
@@ -662,6 +693,52 @@ async function saveGame(e){
   if(editId){const idx=db.games.findIndex(x=>x.id===editId);if(idx>=0)db.games[idx]=game;else db.games.push(game);}
   else db.games.push(game);
   editId=null;go('games');
+}
+
+function buildSeriesStandings(){
+  const GOAL=5;
+  // 시즌별 최대 시즌 번호
+  const maxSeason=db.games.reduce((m,g)=>Math.max(m,g.season??1),0);
+  // 게임을 (season, seriesNum)으로 그룹핑
+  const seriesMap={};
+  db.games.forEach(g=>{
+    const key=(g.season??1)+'-'+(g.seriesNum??1);
+    if(!seriesMap[key])seriesMap[key]={season:g.season??1,num:g.seriesNum??1,winsPerTeam:{}};
+    if(g.win==='T')return;
+    const winPids=(g.win==='A'?g.teamA.players:g.teamB.players);
+    const tk=[...winPids].sort((a,b)=>a-b).join(',');
+    seriesMap[key].winsPerTeam[tk]=(seriesMap[key].winsPerTeam[tk]||0)+1;
+  });
+  // 각 시리즈에서 2승팀에게 시리즈 우승 부여
+  const sw={};
+  PLAYERS.forEach(p=>sw[p.id]=0);
+  Object.values(seriesMap).forEach(s=>{
+    Object.entries(s.winsPerTeam).forEach(([tk,wins])=>{
+      if(wins>=2){
+        tk.split(',').map(Number).forEach(pid=>{if(sw[pid]!==undefined)sw[pid]++;});
+      }
+    });
+  });
+  return{sw,maxSeason,GOAL};
+}
+
+function renderSeasonCard(){
+  const{sw,maxSeason,GOAL}=buildSeriesStandings();
+  document.getElementById('season-card-title').textContent='🏆 시즌 '+maxSeason+' 현황';
+  const sorted=[...PLAYERS].sort((a,b)=>(sw[b.id]||0)-(sw[a.id]||0));
+  const champion=sorted.find(p=>(sw[p.id]||0)>=GOAL);
+  document.getElementById('d-season').innerHTML=sorted.map(p=>{
+    const v=sw[p.id]||0;
+    const pct=Math.min(v/GOAL*100,100);
+    const isChamp=(sw[p.id]||0)>=GOAL;
+    const barClr=isChamp?'#FFD700':'var(--green)';
+    const valClr=isChamp?'#FFD700':v>0?'var(--green)':'var(--dim)';
+    return '<div class="season-row">'+
+      '<div class="season-name">'+p.name+'</div>'+
+      '<div class="season-bar-bg"><div class="season-bar-fill" style="width:'+pct+'%;background:'+barClr+'"></div></div>'+
+      '<div class="season-val" style="color:'+valClr+'">'+(isChamp?'👑':v+'/'+GOAL)+'</div>'+
+    '</div>';
+  }).join('');
 }
 
 function buildAgg(){
@@ -690,6 +767,7 @@ function rDash(){
   const gs=db.games;
   document.getElementById('d-sub').textContent=gs.length?'총 '+gs.length+'경기 · 최근 '+fmtDate(gs.slice(-1)[0]?.date||''):'경기를 입력하면 통계가 표시됩니다';
   document.getElementById('d-total').textContent=gs.length;
+  renderSeasonCard();
   const agg=buildAgg();
   const active=PLAYERS.filter(p=>agg[p.id]?.g>0);
 
@@ -830,7 +908,7 @@ function rGames(){
     sorted.map(g=>{
       const isA=g.win==='A',isT=g.win==='T';
       return '<tr>'+
-        '<td style="color:var(--dim);font-size:12px;white-space:nowrap">'+fmtDate(g.date)+'</td>'+
+        '<td style="color:var(--dim);font-size:12px;white-space:nowrap">'+fmtDate(g.date)+'<div style="font-size:10px;color:var(--dim2);margin-top:2px">S'+(g.season??1)+'-R'+(g.seriesNum??1)+'</div></td>'+
         '<td><div class="pchips">'+g.teamA.players.map(pid=>'<span class="pchip a">'+pName(pid)+'</span>').join('')+'</div><div style="font-size:11px;color:var(--dim);margin-top:4px">안타 '+g.teamA.H+'</div></td>'+
         '<td class="c"><span style="font-weight:800;font-size:20px;color:'+(isA?'var(--green)':'var(--dim)')+'">'+g.teamA.R+'</span><span style="color:var(--brd);margin:0 5px">:</span><span style="font-weight:800;font-size:20px;color:'+(!isA&&!isT?'var(--green)':'var(--dim)')+'">'+g.teamB.R+'</span></td>'+
         '<td><div class="pchips">'+g.teamB.players.map(pid=>'<span class="pchip b">'+pName(pid)+'</span>').join('')+'</div><div style="font-size:11px;color:var(--dim);margin-top:4px">안타 '+g.teamB.H+'</div></td>'+
