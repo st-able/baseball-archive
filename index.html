@@ -191,6 +191,11 @@ th.srt-asc::after{content:'▲'}
 .mvp-tag.sel{background:var(--green);color:#000}
 .mvp-crown{font-size:18px;line-height:1.2}
 @media(max-width:480px){.mvp-grid{grid-template-columns:repeat(2,1fr)}}
+/* ── 대시보드 탭 ── */
+.dash-tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+.dtab{padding:6px 14px;border-radius:20px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid var(--brd);background:transparent;color:var(--dim);font-family:'Pretendard',sans-serif;transition:all .15s}
+.dtab:hover{border-color:var(--dim);color:var(--tx)}
+.dtab.on{background:var(--green-bg);border-color:var(--green-bd);color:var(--green)}
 /* ── 코멘트 ── */
 .cmt-list{display:flex;flex-direction:column;gap:9px;margin-bottom:12px}
 .cmt-item{background:var(--sur2);border:1px solid var(--brd);border-radius:9px;padding:11px 13px}
@@ -246,6 +251,8 @@ th.srt-asc::after{content:'▲'}
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>경기 입력
     </button>
   </div>
+  <div class="dash-tabs" id="dash-tabs"></div>
+  <div class="card mb" id="d-hot" style="display:none"></div>
   <div class="g4 mb">
     <div class="sc g"><div class="sl">총 경기</div><div class="sv" id="d-total">0</div><div class="sd2">전체 경기 수</div></div>
     <div class="sc b"><div class="sl">최다 승</div><div class="sv" id="d-wins">0</div><div id="d-wins-top"></div></div>
@@ -438,6 +445,8 @@ let db={games:[],comments:[]};
 let editId=null,teamMap={},CHS={};
 let statSortCol='wr',statSortDir='desc';
 let mvpId=null; // null=자동모드, pid=수동선택
+let dashMode='all';
+let announcedSeasons=new Set();
 
 /* ── Supabase ── */
 const SB_URL='https://bgpozpykftanzrrytgna.supabase.co';
@@ -751,21 +760,21 @@ async function saveGame(e){
   editId=null;go('games');
 }
 
-function buildSeriesStandings(){
+function buildSeriesStandings(targetSeason){
   const GOAL=5;
-  // 시즌별 최대 시즌 번호
-  const maxSeason=db.games.reduce((m,g)=>Math.max(m,g.season||1),1);
-  // 게임을 (season, seriesNum)으로 그룹핑
+  const activeGames=db.games.filter(g=>(g.season??1)>=1);
+  const maxSeason=activeGames.length?activeGames.reduce((m,g)=>Math.max(m,g.season??1),1):1;
+  const season=targetSeason!==undefined?targetSeason:maxSeason;
+  const curGames=activeGames.filter(g=>(g.season??1)===season);
   const seriesMap={};
-  db.games.forEach(g=>{
-    const key=(g.season||1)+'-'+(g.seriesNum||1);
-    if(!seriesMap[key])seriesMap[key]={season:g.season||1,num:g.seriesNum||1,winsPerTeam:{}};
+  curGames.forEach(g=>{
+    const key=(g.seriesNum??1);
+    if(!seriesMap[key])seriesMap[key]={num:g.seriesNum??1,winsPerTeam:{}};
     if(g.win==='T')return;
     const winPids=(g.win==='A'?g.teamA.players:g.teamB.players);
     const tk=[...winPids].sort((a,b)=>a-b).join(',');
     seriesMap[key].winsPerTeam[tk]=(seriesMap[key].winsPerTeam[tk]||0)+1;
   });
-  // 각 시리즈에서 2승팀에게 시리즈 우승 부여
   const sw={};
   PLAYERS.forEach(p=>sw[p.id]=0);
   Object.values(seriesMap).forEach(s=>{
@@ -775,14 +784,15 @@ function buildSeriesStandings(){
       }
     });
   });
-  return{sw,maxSeason,GOAL};
+  return{sw,maxSeason,season,GOAL};
 }
 
-function renderSeasonCard(){
-  const{sw,maxSeason,GOAL}=buildSeriesStandings();
-  document.getElementById('season-card-title').textContent='🏆 시즌 '+maxSeason+' 현황';
+function renderSeasonCard(targetSeason){
+  const{sw,maxSeason,season,GOAL}=buildSeriesStandings(targetSeason);
+  document.getElementById('season-card-title').textContent='🏆 시즌 '+season+' 현황';
   const sorted=[...PLAYERS].sort((a,b)=>(sw[b.id]||0)-(sw[a.id]||0));
   const champion=sorted.find(p=>(sw[p.id]||0)>=GOAL);
+  if(champion&&!announcedSeasons.has(season)){announcedSeasons.add(season);showSeasonEnd(champion,season);}
   document.getElementById('d-season').innerHTML=sorted.map(p=>{
     const v=sw[p.id]||0;
     const pct=Math.min(v/GOAL*100,100);
@@ -797,10 +807,11 @@ function renderSeasonCard(){
   }).join('');
 }
 
-function buildAgg(){
+function buildAgg(games){
+  games=games||db.games;
   const agg={};
   PLAYERS.forEach(p=>agg[p.id]={W:0,L:0,T:0,PA:0,AB:0,H:0,R:0,RBI:0,HR:0,SO:0,g:0,MVP:0});
-  db.games.forEach(g=>{
+  games.forEach(g=>{
     const addStats=(pids,res,teamStats)=>pids.forEach(pid=>{
       if(!agg[pid])return;
       const a=agg[pid];
@@ -819,12 +830,25 @@ function buildAgg(){
   return agg;
 }
 
+function setDashMode(mode){dashMode=mode;rDash();}
 function rDash(){
-  const gs=db.games;
-  document.getElementById('d-sub').textContent=gs.length?'총 '+gs.length+'경기 · 최근 '+fmtDate(gs.slice(-1)[0]?.date||''):'경기를 입력하면 통계가 표시됩니다';
+  // ── 탭 생성 ──
+  const allSeasons=[...new Set(db.games.filter(g=>(g.season??1)>=1).map(g=>g.season??1))].sort((a,b)=>b-a);
+  const maxSeason=allSeasons.length?allSeasons[0]:1;
+  if(dashMode!=='all'&&allSeasons.length&&!allSeasons.includes(dashMode))dashMode=maxSeason;
+  const tabsEl=document.getElementById('dash-tabs');
+  if(tabsEl)tabsEl.innerHTML=
+    '<button class="dtab'+(dashMode==='all'?' on':'')+'" onclick="setDashMode(\'all\')">전체 누적</button>'+
+    allSeasons.map(s=>'<button class="dtab'+(dashMode===s?' on':'')+'" onclick="setDashMode('+s+')">시즌 '+s+'</button>').join('');
+  // ── 게임 필터 ──
+  const gs=dashMode==='all'?db.games:db.games.filter(g=>(g.season??1)===dashMode);
+  // ── 시즌 현황 카드 ──
+  const seasonCard=document.getElementById('season-card');
+  if(seasonCard)seasonCard.style.display=dashMode==='all'?'none':'block';
+  if(dashMode!=='all')renderSeasonCard(dashMode);
+  document.getElementById('d-sub').textContent=gs.length?'총 '+gs.length+'경기 · 최근 '+fmtDate([...gs].sort((a,b)=>b.date.localeCompare(a.date))[0]?.date||''):'경기를 입력하면 통계가 표시됩니다';
   document.getElementById('d-total').textContent=gs.length;
-  renderSeasonCard();
-  const agg=buildAgg();
+  const agg=buildAgg(gs);
   const active=PLAYERS.filter(p=>agg[p.id]?.g>0);
 
   // top3 HTML 생성 헬퍼
@@ -852,6 +876,30 @@ function rDash(){
   document.getElementById('d-mvp-cnt').textContent=mvpTop.length&&agg[mvpTop[0].id].MVP>0?agg[mvpTop[0].id].MVP:0;
   document.getElementById('d-mvp-top').innerHTML=mvpTop[0]&&agg[mvpTop[0].id].MVP>0?top3Html(mvpTop.filter(p=>agg[p.id].MVP>0),p=>agg[p.id].MVP+'회'):'<div style="margin-top:6px;font-size:12px;color:var(--dim2)">기록 없음</div>';
 
+  // ── 최근 3경기 핫 플레이어 ──
+  const hotEl=document.getElementById('d-hot');
+  if(hotEl){
+    const rec3=[...gs].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+    if(rec3.length>=1){
+      const hotScore={};PLAYERS.forEach(p=>hotScore[p.id]=0);
+      rec3.forEach(g=>{
+        [...g.teamA.players,...g.teamB.players].forEach(pid=>{
+          const teamStats=g.teamA.players.includes(pid)?g.teamA.stats:g.teamB.stats;
+          const s=teamStats&&teamStats[pid];
+          if(s)hotScore[pid]+=(s.HR||0)*4+(s.RBI||0)*2+(s.H||0)+(s.R||0);
+        });
+      });
+      const hotRank=PLAYERS.filter(p=>hotScore[p.id]>0).sort((a,b)=>hotScore[b.id]-hotScore[a.id]).slice(0,2);
+      hotEl.style.display='block';
+      hotEl.innerHTML='<div class="ct">🔥 최근 '+rec3.length+'경기 핫 플레이어</div>'+
+        (hotRank.length?'<div style="display:flex;gap:12px">'+hotRank.map((p,i)=>
+          '<div style="flex:1;background:var(--sur2);border:1px solid '+(i===0?'rgba(255,140,26,.4)':'var(--brd)')+';border-radius:10px;padding:12px 14px">'+
+            '<div style="font-size:10px;color:'+(i===0?'var(--orange)':'var(--dim)')+';font-weight:700;margin-bottom:4px">'+(i===0?'🔥 1위':'⚡ 2위')+'</div>'+
+            '<div style="font-weight:800;font-size:15px;color:#c0c0c0;margin-bottom:4px">'+p.name+'</div>'+
+            '<div style="font-size:12px;color:var(--dim)">MVP 점수 '+hotScore[p.id]+'점</div>'+
+          '</div>').join('')+'</div>':'<div style="font-size:12px;color:var(--dim)">기록이 없습니다</div>');
+    }else{hotEl.style.display='none';}
+  }
   const rec=[...gs].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   const dre=document.getElementById('d-recent');
   if(!rec.length){
@@ -1040,6 +1088,21 @@ function showDetail(id){
 function closeMod(){document.getElementById('m-detail').classList.remove('open');}
 document.getElementById('m-detail').addEventListener('click',e=>{if(e.target.id==='m-detail')closeMod();});
 
+function showSeasonEnd(player,season){
+  if(document.getElementById('season-end-overlay'))return;
+  const ov=document.createElement('div');
+  ov.id='season-end-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML=
+    '<div style="background:#111;border:1px solid rgba(255,215,0,.3);border-radius:16px;padding:36px 40px;text-align:center;max-width:380px">'+
+      '<div style="font-size:56px;margin-bottom:12px">🏆</div>'+
+      '<div style="font-size:13px;color:rgba(255,215,0,.7);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">시즌 '+season+' 종료</div>'+
+      '<div style="font-size:28px;font-weight:800;color:#FFD700;margin-bottom:6px">'+player.name+'</div>'+
+      '<div style="font-size:14px;color:#999;margin-bottom:28px">시리즈 5회 우승 달성 · 시즌 챔피언!</div>'+
+      '<button onclick="document.getElementById(\'season-end-overlay\').remove()" style="background:var(--green);color:#000;border:none;border-radius:9px;padding:11px 28px;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Pretendard\',sans-serif">확인</button>'+
+    '</div>';
+  document.body.appendChild(ov);
+}
 function renderComments(gameId){
   const el=document.getElementById('cmt-list-'+gameId);
   if(!el)return;
