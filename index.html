@@ -252,7 +252,6 @@ th.srt-asc::after{content:'▲'}
     </button>
   </div>
   <div class="dash-tabs" id="dash-tabs"></div>
-  <div class="card mb" id="d-hot" style="display:none"></div>
   <div class="g4 mb">
     <div class="sc g"><div class="sl">총 경기</div><div class="sv" id="d-total">0</div><div class="sd2">전체 경기 수</div></div>
     <div class="sc b"><div class="sl">최다 승</div><div class="sv" id="d-wins">0</div><div id="d-wins-top"></div></div>
@@ -266,6 +265,7 @@ th.srt-asc::after{content:'▲'}
     </div>
     <div id="d-season"></div>
   </div>
+  <div class="card mb" id="d-hot" style="display:none"></div>
   <div class="g3 mb">
     <div class="card"><div class="ct">최근 경기</div><div id="d-recent"></div></div>
     <div class="card"><div class="ct">승률 랭킹</div><div id="d-rank"></div></div>
@@ -454,13 +454,13 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const supa=supabase.createClient(SB_URL,SB_KEY);
 
 function toRow(g){
-  return{id:g.id,date:g.date,play_time:g.playTime||null,season:g.season||1,series_num:g.seriesNum||1,
+  return{id:g.id,date:g.date,play_time:g.playTime||null,season:g.season??1,series_num:g.seriesNum??1,
     team_a_players:g.teamA.players,team_a_r:g.teamA.R,team_a_h:g.teamA.H,team_a_stats:g.teamA.stats||null,
     team_b_players:g.teamB.players,team_b_r:g.teamB.R,team_b_h:g.teamB.H,team_b_stats:g.teamB.stats||null,
     win:g.win,mvp:g.mvp||null};
 }
 function fromRow(r){
-  return{id:r.id,date:r.date,playTime:r.play_time||'',season:r.season||1,seriesNum:r.series_num||1,
+  return{id:r.id,date:r.date,playTime:r.play_time||'',season:r.season??1,seriesNum:r.series_num??1,
     teamA:{players:r.team_a_players||[],R:r.team_a_r||0,H:r.team_a_h||0,stats:r.team_a_stats||{}},
     teamB:{players:r.team_b_players||[],R:r.team_b_r||0,H:r.team_b_h||0,stats:r.team_b_stats||{}},
     win:r.win,mvp:r.mvp||null};
@@ -607,8 +607,8 @@ function initForm(gid){
     document.getElementById('f-date').value=new Date().toISOString().slice(0,10);
     document.getElementById('f-time').value='';
     // default season/series: latest season, latest series in that season
-    const _maxSeason=db.games.reduce((m,g)=>Math.max(m,g.season||1),1);
-    const _seriesInSeason=db.games.filter(g=>(g.season||1)===_maxSeason).map(g=>g.seriesNum||1);
+    const _maxSeason=db.games.reduce((m,g)=>Math.max(m,g.season??1),1);
+    const _seriesInSeason=db.games.filter(g=>(g.season??1)===_maxSeason).map(g=>g.seriesNum??1);
     const _maxSeries=_seriesInSeason.length?Math.max(..._seriesInSeason):1;
     document.getElementById('f-season').value=_maxSeason;
     document.getElementById('f-series').value=_maxSeries;
@@ -742,8 +742,8 @@ async function saveGame(e){
     teamB:{players:tB,R:bR,H:parseInt(document.getElementById('bH').value)||0,stats:getStats(tB)},
     win:aR>bR?'A':aR<bR?'B':'T',
     mvp:finalMvp,
-    season:parseInt(document.getElementById('f-season').value)||1,
-    seriesNum:parseInt(document.getElementById('f-series').value)||1
+    season:parseInt(document.getElementById('f-season').value)??1,
+    seriesNum:parseInt(document.getElementById('f-series').value)??1
   };
   setLoading(true,'저장 중...');
   const ok=await upsertGame(game);
